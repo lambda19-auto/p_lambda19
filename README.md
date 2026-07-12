@@ -1,20 +1,41 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# lambda19 website
 
-# Run and deploy your AI Studio app
+React/Vite website served by a single Express backend in `server.ts`.
 
-This contains everything you need to run your app locally.
+The consultant widget uses the OpenAI Agents SDK and the agents in `neuro_seller/`:
 
-View your app in AI Studio: https://ai.studio/apps/f0b6b9ad-0bb0-4dbb-83f3-d69124bf8627
+- `router.ts`
+- `consult.ts`
+- `goodbye-soft.ts`
+- `goodbye-hard.ts`
 
-## Run Locally
-
-**Prerequisites:**  Node.js
-
+## Local setup
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+
+```bash
+npm install
+```
+
+2. Create `.env`:
+
+```env
+OPENAI_API_KEY=your_openai_api_key
+JWT_SECRET=your_jwt_secret
+PORT=3000
+```
+
+3. Start development mode:
+
+```bash
+npm run dev
+```
+
+## Validation
+
+```bash
+npm run lint
+npm run build
+```
+
+The browser sends chat messages to `POST /api/chat`. Agent instructions and the OpenAI API key remain on the server.

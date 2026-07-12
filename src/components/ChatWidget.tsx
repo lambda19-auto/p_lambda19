@@ -18,6 +18,9 @@ export default function ChatWidget() {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionId, setSessionId] = useState(() =>
+    localStorage.getItem('lambda19_widget_session') || crypto.randomUUID()
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -65,7 +68,7 @@ export default function ChatWidget() {
         },
         body: JSON.stringify({
           messages: updatedMessages,
-          systemInstruction: t.chat.system,
+          sessionId,
         }),
       });
 
@@ -75,6 +78,10 @@ export default function ChatWidget() {
 
       const data = await response.json();
       if (data.success) {
+        if (data.sessionId && data.sessionId !== sessionId) {
+          setSessionId(data.sessionId);
+          localStorage.setItem('lambda19_widget_session', data.sessionId);
+        }
         setMessages(prev => [...prev, { role: 'assistant', content: data.text }]);
       } else {
         throw new Error(data.message || 'Error processing chat');

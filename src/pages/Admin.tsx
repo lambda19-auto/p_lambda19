@@ -85,6 +85,8 @@ export default function Admin() {
   
   // Leads states
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [leadsLoading, setLeadsLoading] = useState(false);
+  const [leadsError, setLeadsError] = useState('');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -244,144 +246,104 @@ export default function Admin() {
     setDialogs(initial);
   }, [language]);
 
-  // Default seeded leads if localStorage is empty
-  const defaultLeads: Lead[] = [
-    {
-      id: 'lead_1',
-      name: 'Алексей Смирнов',
-      contact: '@alex_smirnov (Telegram)',
-      task: 'Автоматизация квалификации холодных лидов из Telegram-каналов с последующим занесением в CRM.',
-      status: 'New',
-      createdAt: new Date(Date.now() - 3600000 * 2).toISOString(), // 2 hours ago
-      notes: 'Потенциальный крупный клиент. Требуется интеграция с Bitrix24.'
-    },
-    {
-      id: 'lead_2',
-      name: 'Мария Петрова',
-      contact: 'm.petrova@fintech.ru',
-      task: 'Разработка агента-парсера инвойсов из PDF-файлов с автоматическим сопоставлением счетов в 1С.',
-      status: 'In Progress',
-      createdAt: new Date(Date.now() - 3600000 * 24).toISOString(), // 1 day ago
-      notes: 'Уже отправили ТЗ. Спецификация 1C API изучается командой разработки.'
-    },
-    {
-      id: 'lead_3',
-      name: 'John Davidson',
-      contact: 'davidson.j@techcorp.com',
-      task: 'Autonomous customer support agent speaking 3 languages with support tickets dispatching logic.',
-      status: 'Completed',
-      createdAt: new Date(Date.now() - 3600000 * 72).toISOString(), // 3 days ago
-      notes: 'Успешно внедрили пилотную версию. Контракт на поддержку подписан.'
-    }
-  ];
-
-  // Load leads from localStorage
+  // Load leads from PostgreSQL through the authenticated API.
   useEffect(() => {
-    const loadLeads = () => {
-      const stored = localStorage.getItem('lambda19_leads');
-      if (stored) {
-        try {
-          setLeads(JSON.parse(stored));
-        } catch (e) {
-          setLeads(defaultLeads);
-        }
-      } else {
-        localStorage.setItem('lambda19_leads', JSON.stringify(defaultLeads));
-        setLeads(defaultLeads);
+    if (!isAuthenticated) return;
+    const loadLeads = async () => {
+      setLeadsLoading(true);
+      setLeadsError('');
+      try {
+        const token = localStorage.getItem('admin_token');
+        const response = await fetch('/api/leads', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data.leads)) throw new Error('Unable to load leads');
+        setLeads(data.leads);
+      } catch {
+        setLeadsError(language === 'ru' ? 'Не удалось загрузить заявки.' : 'Unable to load leads.');
+      } finally {
+        setLeadsLoading(false);
       }
     };
+    void loadLeads();
+  }, [isAuthenticated, language]);
 
-    loadLeads();
+  const replaceLead = (updatedLead: Lead) => {
+    setLeads((current) => current.map((lead) => lead.id === updatedLead.id ? updatedLead : lead));
+    if (selectedLead?.id === updatedLead.id) setSelectedLead(updatedLead);
+  };
 
-    const handleUpdate = () => {
-      loadLeads();
-    };
-
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'lambda19_leads') {
-        loadLeads();
-      }
-    };
-
-    window.addEventListener('lambda19_leads_updated', handleUpdate);
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('lambda19_leads_updated', handleUpdate);
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, []);
-
-  // Handle localStorage updates
-  const updateLeadsList = (updatedLeads: Lead[]) => {
-    setLeads(updatedLeads);
-    localStorage.setItem('lambda19_leads', JSON.stringify(updatedLeads));
-    window.dispatchEvent(new Event('lambda19_leads_updated'));
+  const updateLead = async (leadId: string, changes: { status?: Lead['status']; notes?: string }) => {
+    const token = localStorage.getItem('admin_token');
+    const response = await fetch(`/api/leads/${leadId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(changes),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.lead) throw new Error('Unable to update lead');
+    replaceLead(data.lead);
   };
 
   // Lead status updater
-  const handleUpdateStatus = (leadId: string, newStatus: Lead['status']) => {
-    const updated = leads.map(l => {
-      if (l.id === leadId) {
-        const up = { ...l, status: newStatus };
-        if (selectedLead && selectedLead.id === leadId) {
-          setSelectedLead(up);
-        }
-        return up;
-      }
-      return l;
-    });
-    updateLeadsList(updated);
+  const handleUpdateStatus = async (leadId: string, newStatus: Lead['status']) => {
+    try {
+      await updateLead(leadId, { status: newStatus });
+    } catch {
+      setLeadsError(language === 'ru' ? 'Не удалось изменить статус.' : 'Unable to update status.');
+    }
   };
 
   // Save notes
-  const handleSaveNotes = () => {
+  const handleSaveNotes = async () => {
     if (!selectedLead) return;
-    const updated = leads.map(l => {
-      if (l.id === selectedLead.id) {
-        const up = { ...l, notes: editingNotes };
-        setSelectedLead(up);
-        return up;
-      }
-      return l;
-    });
-    updateLeadsList(updated);
+    try {
+      await updateLead(selectedLead.id, { notes: editingNotes });
+    } catch {
+      setLeadsError(language === 'ru' ? 'Не удалось сохранить заметку.' : 'Unable to save notes.');
+    }
   };
 
   // Delete lead
-  const handleDeleteLead = (leadId: string) => {
+  const handleDeleteLead = async (leadId: string) => {
     if (window.confirm('Вы уверены, что хотите удалить эту заявку?')) {
-      const filtered = leads.filter(l => l.id !== leadId);
-      updateLeadsList(filtered);
-      if (selectedLead && selectedLead.id === leadId) {
-        setSelectedLead(null);
+      try {
+        const token = localStorage.getItem('admin_token');
+        const response = await fetch(`/api/leads/${leadId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) throw new Error('Unable to delete lead');
+        setLeads((current) => current.filter((lead) => lead.id !== leadId));
+        if (selectedLead?.id === leadId) setSelectedLead(null);
+      } catch {
+        setLeadsError(language === 'ru' ? 'Не удалось удалить заявку.' : 'Unable to delete lead.');
       }
     }
   };
 
   // Add manual lead
-  const handleAddManualLead = (e: React.FormEvent) => {
+  const handleAddManualLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newLeadName || !newLeadContact) return;
 
-    const newLead: Lead = {
-      id: `lead_${Date.now()}`,
-      name: newLeadName,
-      contact: newLeadContact,
-      task: newLeadTask,
-      status: 'New',
-      createdAt: new Date().toISOString(),
-      notes: ''
-    };
-
-    const updated = [newLead, ...leads];
-    updateLeadsList(updated);
-    
-    // reset form
-    setNewLeadName('');
-    setNewLeadContact('');
-    setNewLeadTask('');
-    setShowAddLead(false);
+    try {
+      const response = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newLeadName, contact: newLeadContact, task: newLeadTask }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.lead) throw new Error('Unable to create lead');
+      setLeads((current) => [data.lead, ...current]);
+      setNewLeadName('');
+      setNewLeadContact('');
+      setNewLeadTask('');
+      setShowAddLead(false);
+    } catch {
+      setLeadsError(language === 'ru' ? 'Не удалось создать заявку.' : 'Unable to create lead.');
+    }
   };
 
   // Filters leads
@@ -541,7 +503,7 @@ export default function Admin() {
               </div>
               <div className="text-slate-500 font-mono uppercase tracking-wider">{language === 'ru' ? 'База данных' : 'Database Status'}</div>
               <div className="font-mono text-white">
-                LocalStorage Cache
+                PostgreSQL
               </div>
             </div>
           </div>
@@ -907,7 +869,7 @@ export default function Admin() {
                       />
                     </div>
                     <button className="bg-lambda-orange hover:bg-orange-600 text-white px-5 py-2.5 rounded-xl font-semibold text-sm cursor-pointer">
-                      {language === 'ru' ? 'Сохранить лид в LocalStorage' : 'Save Lead'}
+                      {language === 'ru' ? 'Сохранить заявку' : 'Save Lead'}
                     </button>
                   </form>
                 </motion.div>
@@ -949,10 +911,20 @@ export default function Admin() {
                 <div className="glass-panel overflow-hidden h-[550px] flex flex-col">
                   <div className="p-4 border-b border-white/5 text-xs text-slate-500 font-mono flex justify-between">
                     <span>{language === 'ru' ? 'НАЙДЕНО:' : 'RESULTS:'} {filteredLeads.length}</span>
-                    <span>LOCAL_STORAGE_CACHE</span>
+                    <span>POSTGRESQL</span>
                   </div>
                   
                   <div className="flex-1 overflow-y-auto divide-y divide-white/5">
+                    {leadsLoading && (
+                      <div className="p-12 text-center text-slate-500 font-mono">
+                        {language === 'ru' ? 'Загрузка заявок...' : 'Loading leads...'}
+                      </div>
+                    )}
+                    {leadsError && !leadsLoading && (
+                      <div role="alert" className="p-4 text-center text-rose-400 text-sm">
+                        {leadsError}
+                      </div>
+                    )}
                     {filteredLeads.map(lead => (
                       <div 
                         key={lead.id}
@@ -1036,10 +1008,10 @@ export default function Admin() {
                           <div className="border-t border-white/5 pt-3">
                             <span className="text-[10px] font-mono text-slate-500 uppercase block mb-2">{language === 'ru' ? 'СТАТУС ОБРАБОТКИ' : 'LEAD STATUS'}</span>
                             <div className="grid grid-cols-2 gap-2">
-                              {['New', 'In Progress', 'Completed', 'Rejected'].map(st => (
+                              {(['New', 'In Progress', 'Completed', 'Rejected'] as Lead['status'][]).map(st => (
                                 <button
                                   key={st}
-                                  onClick={() => handleUpdateStatus(selectedLead.id, st as any)}
+                                  onClick={() => handleUpdateStatus(selectedLead.id, st)}
                                   className={`px-3 py-1.5 rounded text-xs font-mono border text-center transition-all cursor-pointer ${
                                     selectedLead.status === st
                                       ? st === 'New' ? 'bg-orange-500/15 text-orange-400 border-orange-500/30' :
@@ -1371,7 +1343,7 @@ export default function Admin() {
                 <div>
                   <h4 className="font-bold text-yellow-500 text-sm font-mono">{language === 'ru' ? 'ПРЕДУПРЕЖДЕНИЕ БЕЗОПАСНОСТИ' : 'CYBERSECURITY COMPLIANCE NOTIFICATION'}</h4>
                   <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                    {language === 'ru' ? 'Текущий запуск панели администратора происходит в защищенной песочнице. Все лид-заявки сохраняются локально в кеше браузера (LocalStorage), что гарантирует изоляцию и предотвращает утечку конфиденциальной информации клиентов.' : 'This administrative dashboard is running securely inside your container Sandbox. Lead items are persistent inside your local browser cache (LocalStorage), ensuring 100% telemetry isolation and compliant secure evaluation.'}
+                    {language === 'ru' ? 'Заявки сохраняются централизованно в PostgreSQL. Просмотр, изменение статуса, заметок и удаление доступны только после авторизации администратора.' : 'Leads are stored centrally in PostgreSQL. Viewing, changing statuses or notes, and deletion require administrator authentication.'}
                   </p>
                 </div>
               </div>

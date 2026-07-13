@@ -1,9 +1,20 @@
 import 'dotenv/config';
 import { timingSafeEqual } from 'crypto';
-import express from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import path from 'path';
 import jwt from 'jsonwebtoken';
 
+import {
+  LEAD_STATUSES,
+  checkDatabase,
+  closeDatabase,
+  createLead,
+  deleteLead,
+  listLeads,
+  runMigrations,
+  updateLead,
+  type LeadStatus,
+} from './database.js';
 import { runRouterOnce } from './neuro_seller/router.js';
 
 type ChatMessage = {
@@ -26,6 +37,16 @@ function safeEqual(left: string, right: string): boolean {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+function isLeadStatus(value: unknown): value is LeadStatus {
+  return typeof value === 'string' && LEAD_STATUSES.some((status) => status === value);
+}
+
+function parseRequiredText(value: unknown, maxLength: number): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= maxLength ? normalized : null;
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -37,8 +58,27 @@ async function startServer() {
     throw new Error('JWT_SECRET must contain at least 32 characters');
   }
 
+  await runMigrations();
+
   app.disable('x-powered-by');
   app.use(express.json({ limit: '32kb' }));
+
+  const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, message: 'No token provided' });
+    }
+
+    try {
+      jwt.verify(authHeader.slice(7), JWT_SECRET, {
+        algorithms: ['HS256'],
+        issuer: 'lambda19',
+      });
+      return next();
+    } catch {
+      return res.status(401).json({ success: false, message: 'Invalid or expired token' });
+    }
+  };
 
   app.post('/api/login', (req, res) => {
     const { username, password } = req.body as { username?: unknown; password?: unknown };
@@ -71,6 +111,75 @@ async function startServer() {
       return res.json({ success: true, decoded });
     } catch {
       return res.status(401).json({ success: false, message: 'Invalid or expired token' });
+    }
+  });
+
+  app.post('/api/leads', async (req, res) => {
+    try {
+      const { name, contact, task } = req.body as {
+        name?: unknown;
+        contact?: unknown;
+        task?: unknown;
+      };
+      const validName = parseRequiredText(name, 200);
+      const validContact = parseRequiredText(contact, 500);
+      const validTask = task === undefined || task === '' ? '' : parseRequiredText(task, 10_000);
+
+      if (!validName || !validContact || validTask === null) {
+        return res.status(400).json({ success: false, message: 'Invalid lead data' });
+      }
+
+      const lead = await createLead({ name: validName, contact: validContact, task: validTask });
+      return res.status(201).json({ success: true, lead });
+    } catch (error: unknown) {
+      console.error('Error creating lead:', error);
+      return res.status(500).json({ success: false, message: 'Unable to save the lead' });
+    }
+  });
+
+  app.get('/api/leads', requireAdmin, async (_req, res) => {
+    try {
+      return res.json({ success: true, leads: await listLeads() });
+    } catch (error: unknown) {
+      console.error('Error listing leads:', error);
+      return res.status(500).json({ success: false, message: 'Unable to load leads' });
+    }
+  });
+
+  app.patch('/api/leads/:id', requireAdmin, async (req, res) => {
+    try {
+      const { status, notes } = req.body as { status?: unknown; notes?: unknown };
+      if (status === undefined && notes === undefined) {
+        return res.status(400).json({ success: false, message: 'No changes provided' });
+      }
+      if (status !== undefined && !isLeadStatus(status)) {
+        return res.status(400).json({ success: false, message: 'Invalid lead status' });
+      }
+      if (notes !== undefined && (typeof notes !== 'string' || notes.length > 10_000)) {
+        return res.status(400).json({ success: false, message: 'Invalid lead notes' });
+      }
+
+      const lead = await updateLead(req.params.id, {
+        status: status as LeadStatus | undefined,
+        notes: typeof notes === 'string' ? notes.trim() : undefined,
+      });
+      return lead
+        ? res.json({ success: true, lead })
+        : res.status(404).json({ success: false, message: 'Lead not found' });
+    } catch (error: unknown) {
+      console.error('Error updating lead:', error);
+      return res.status(500).json({ success: false, message: 'Unable to update the lead' });
+    }
+  });
+
+  app.delete('/api/leads/:id', requireAdmin, async (req, res) => {
+    try {
+      return (await deleteLead(req.params.id))
+        ? res.status(204).send()
+        : res.status(404).json({ success: false, message: 'Lead not found' });
+    } catch (error: unknown) {
+      console.error('Error deleting lead:', error);
+      return res.status(500).json({ success: false, message: 'Unable to delete the lead' });
     }
   });
 
@@ -115,8 +224,14 @@ async function startServer() {
     }
   });
 
-  app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok' });
+  app.get('/api/health', async (_req, res) => {
+    try {
+      await checkDatabase();
+      return res.json({ status: 'ok', database: 'ok' });
+    } catch (error: unknown) {
+      console.error('Database health check failed:', error);
+      return res.status(503).json({ status: 'error', database: 'unavailable' });
+    }
   });
 
   if (process.env.NODE_ENV !== 'production') {
@@ -134,12 +249,20 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  const shutdown = () => {
+    server.close(() => {
+      void closeDatabase().finally(() => process.exit(0));
+    });
+  };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
 }
 
 startServer().catch((error: unknown) => {
   console.error('Failed to start server:', error);
-  process.exitCode = 1;
+  void closeDatabase().finally(() => process.exit(1));
 });

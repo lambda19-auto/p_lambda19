@@ -26,6 +26,19 @@ cp .env.example .env
 `JWT_SECRET` must contain at least 32 characters. You can generate one with
 `openssl rand -base64 48`. Never commit `.env`.
 
+`DATABASE_URL` must point to an existing PostgreSQL database. For example:
+
+```env
+DATABASE_URL=postgresql://lambda19:strong_password@localhost:5432/lambda19
+```
+
+The database and role can be created once by a PostgreSQL administrator:
+
+```sql
+CREATE ROLE lambda19 WITH LOGIN PASSWORD 'strong_password';
+CREATE DATABASE lambda19 OWNER lambda19;
+```
+
 3. Start development mode:
 
 ```bash
@@ -41,6 +54,8 @@ npm run build
 
 The browser sends chat messages to `POST /api/chat`. Agent instructions and the OpenAI API key remain on the server.
 
+Contact requests are saved through `POST /api/leads`. Authenticated admin API endpoints provide lead listing, status and notes updates, and deletion. Leads are stored in PostgreSQL rather than browser storage.
+
 ## Production
 
 Set `NODE_ENV=production`, build the project, and start the bundled server:
@@ -51,3 +66,9 @@ npm start
 ```
 
 The health endpoint is available at `GET /api/health`.
+
+## Database migrations
+
+The server automatically runs pending SQL files from `migrations/` before it starts accepting HTTP requests. Applied migration names are recorded in `schema_migrations`, so every migration runs only once. A PostgreSQL advisory lock serializes startup migrations when multiple application instances start concurrently.
+
+The production build copies migrations into `dist/migrations`; deploy that directory together with `dist/server.cjs`. If PostgreSQL is unavailable or a migration fails, startup fails without partially applying the migration transaction.

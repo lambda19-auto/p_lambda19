@@ -8,44 +8,35 @@ const ContactForm = () => {
   const [contact, setContact] = useState('');
   const [task, setTask] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !contact) return;
+    if (!name.trim() || !contact.trim() || submitting) return;
 
-    // Create a new lead
-    const newLead = {
-      id: `lead_${Date.now()}`,
-      name,
-      contact,
-      task,
-      status: 'New',
-      createdAt: new Date().toISOString(),
-      notes: ''
-    };
-
-    // Save to localStorage
-    let existingLeads: unknown[] = [];
+    setSubmitting(true);
+    setSubmitError('');
     try {
-      const parsed: unknown = JSON.parse(localStorage.getItem('lambda19_leads') || '[]');
-      if (Array.isArray(parsed)) existingLeads = parsed;
+      const response = await fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, contact, task }),
+      });
+      if (!response.ok) throw new Error('Unable to save lead');
+
+      setSubmitted(true);
+      setName('');
+      setContact('');
+      setTask('');
+      setTimeout(() => setSubmitted(false), 5000);
     } catch {
-      existingLeads = [];
+      setSubmitError(
+        t.contact.submitError || 'Не удалось отправить заявку. Пожалуйста, попробуйте ещё раз.',
+      );
+    } finally {
+      setSubmitting(false);
     }
-    localStorage.setItem('lambda19_leads', JSON.stringify([newLead, ...existingLeads]));
-
-    // Dispatch custom event to notify admin if open in another tab or active
-    window.dispatchEvent(new Event('lambda19_leads_updated'));
-
-    setSubmitted(true);
-    setName('');
-    setContact('');
-    setTask('');
-
-    // Clear success message after 5 seconds
-    setTimeout(() => {
-      setSubmitted(false);
-    }, 5000);
   };
 
   return (
@@ -99,8 +90,11 @@ const ContactForm = () => {
             ></textarea>
           </div>
           <div className="flex flex-col sm:flex-row gap-4">
-            <button className="flex-1 bg-lambda-orange hover:bg-orange-600 text-white py-4 rounded-xl font-bold text-lg transition-all orange-glow cursor-pointer">
-              {t.contact.submit}
+            <button
+              disabled={submitting}
+              className="flex-1 bg-lambda-orange hover:bg-orange-600 disabled:opacity-60 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg transition-all orange-glow cursor-pointer"
+            >
+              {submitting ? (t.contact.submitting || 'Отправка...') : t.contact.submit}
             </button>
             <button 
               type="button"
@@ -110,6 +104,9 @@ const ContactForm = () => {
               {t.contact.askAI}
             </button>
           </div>
+          {submitError && (
+            <p role="alert" className="text-sm text-rose-400 text-center">{submitError}</p>
+          )}
         </form>
       )}
     </div>

@@ -73,9 +73,9 @@ export default function Admin() {
           localStorage.removeItem('admin_token');
           navigate('/login');
         }
-      } catch (err) {
-        // Fallback to offline check or let stay if network failed
-        setIsAuthenticated(true);
+      } catch {
+        localStorage.removeItem('admin_token');
+        navigate('/login');
       }
     };
 
@@ -205,11 +205,11 @@ export default function Admin() {
             timestamp: 'Вчера',
             thoughtChain: lang === 'ru' ? [
               'АНАЛИЗ НАМЕРЕНИЯ: Извлечение структурированных данных из PDF документов.',
-              'ПОИСК РЕШЕНИЯ: Использование мультимодальной модели Gemini 2.5 Flash для OCR + JSON парсинга.',
+              'ПОИСК РЕШЕНИЯ: Использование мультимодальной модели для OCR и извлечения структурированных данных.',
               'СБОР КОНТЕКСТА: Запросить конфигурацию 1С клиента для интеграции.'
             ] : [
               'INTENT ANALYSIS: Structured data extraction from PDF documents.',
-              'SOLUTION SELECTION: Using multimodal Gemini 2.5 Flash for OCR + JSON parsing.',
+              'SOLUTION SELECTION: Using a multimodal model for OCR and structured data extraction.',
               'CONTEXT GATHERING: Request client\'s 1C configuration details for integration.'
             ]
           }
@@ -232,7 +232,7 @@ export default function Admin() {
             timestamp: '26 Июня',
             thoughtChain: [
               'INTENT DETECTED: Multi-language capabilities and routing rules.',
-              'RESOLVING FACT: Native multilingual support in Gemini without translation layers.',
+              'RESOLVING FACT: Native multilingual model support without separate translation layers.',
               'DRAFTING: Assure the user of seamless dynamic language matching.'
             ]
           }
@@ -1194,7 +1194,7 @@ export default function Admin() {
 
                           <div className="flex items-center gap-2">
                             <span className="bg-white/5 text-[10px] font-mono px-2 py-1 rounded text-slate-400">
-                              ENGINE: Gemini-3.5-Flash
+                              ENGINE: GPT-5.4-NANO
                             </span>
                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                             <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-widest font-bold">
@@ -1300,10 +1300,7 @@ export default function Admin() {
                     <div className="space-y-2">
                       <label className="text-xs text-slate-400 block font-mono">{language === 'ru' ? 'ОСНОВНАЯ LLM' : 'PRIMARY LLM GATEWAY'}</label>
                       <select className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-lambda-orange">
-                        <option>Gemini 2.5 Flash (Google Cloud Platform)</option>
-                        <option>Gemini 2.5 Pro (Enterprise Advanced)</option>
-                        <option>Claude 3.5 Sonnet (Direct API proxy)</option>
-                        <option>GPT-4o (Azure API Private Endpoint)</option>
+                        <option>GPT-5.4 Nano (OpenAI API)</option>
                       </select>
                     </div>
 

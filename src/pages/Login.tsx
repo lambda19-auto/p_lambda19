@@ -61,7 +61,7 @@ export default function Login() {
       } else {
         setError(data.message || (language === 'ru' ? 'Неверный логин или пароль' : 'Invalid username or password'));
       }
-    } catch (err) {
+    } catch {
       setError(language === 'ru' ? 'Ошибка связи с сервером. Попробуйте еще раз.' : 'Server connection error. Please try again.');
     } finally {
       setLoading(false);
@@ -77,7 +77,7 @@ export default function Login() {
     passwordPlaceholder: language === 'ru' ? "Введите пароль" : "Enter password",
     submit: language === 'ru' ? "Войти в систему" : "Sign In",
     loading: language === 'ru' ? "Вход..." : "Signing in...",
-    defaultCreds: language === 'ru' ? "Параметры входа: admin / admin" : "Login credentials: admin / admin",
+    credentialsHint: language === 'ru' ? "Используйте учётные данные, заданные администратором." : "Use the credentials configured by your administrator.",
   };
 
   return (
@@ -196,10 +196,10 @@ export default function Login() {
             </button>
           </form>
 
-          {/* Tips / Default Credentials */}
+          {/* Credentials hint */}
           <div className="mt-8 pt-6 border-t border-white/5 text-center">
             <span className="inline-block text-xs font-mono text-lambda-orange/80 bg-lambda-orange/5 border border-lambda-orange/10 px-3 py-1.5 rounded-lg">
-              🔑 {loginText.defaultCreds}
+              <Key size={12} className="inline mr-1" /> {loginText.credentialsHint}
             </span>
           </div>
         </motion.div>

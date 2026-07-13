@@ -1,6 +1,6 @@
 {
-  "name": "v0.0.0-global | lambda19 | AI Automation",
+  "name": "lambda19 | AI Automation",
   "description": "Cutting-edge AI agents and automation solutions for business processes.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

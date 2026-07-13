@@ -17,13 +17,14 @@ The consultant widget uses the OpenAI Agents SDK and the agents in `neuro_seller
 npm install
 ```
 
-2. Create `.env`:
+2. Copy `.env.example` to `.env` and replace every placeholder:
 
-```env
-OPENAI_API_KEY=your_openai_api_key
-JWT_SECRET=your_jwt_secret
-PORT=3000
+```bash
+cp .env.example .env
 ```
+
+`JWT_SECRET` must contain at least 32 characters. You can generate one with
+`openssl rand -base64 48`. Never commit `.env`.
 
 3. Start development mode:
 
@@ -39,3 +40,14 @@ npm run build
 ```
 
 The browser sends chat messages to `POST /api/chat`. Agent instructions and the OpenAI API key remain on the server.
+
+## Production
+
+Set `NODE_ENV=production`, build the project, and start the bundled server:
+
+```bash
+npm run build
+npm start
+```
+
+The health endpoint is available at `GET /api/health`.

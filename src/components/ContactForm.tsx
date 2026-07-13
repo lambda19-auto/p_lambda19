@@ -25,7 +25,13 @@ const ContactForm = () => {
     };
 
     // Save to localStorage
-    const existingLeads = JSON.parse(localStorage.getItem('lambda19_leads') || '[]');
+    let existingLeads: unknown[] = [];
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem('lambda19_leads') || '[]');
+      if (Array.isArray(parsed)) existingLeads = parsed;
+    } catch {
+      existingLeads = [];
+    }
     localStorage.setItem('lambda19_leads', JSON.stringify([newLead, ...existingLeads]));
 
     // Dispatch custom event to notify admin if open in another tab or active

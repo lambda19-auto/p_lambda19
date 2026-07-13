@@ -1,7 +1,7 @@
 import 'dotenv/config';
+import { timingSafeEqual } from 'crypto';
 import express from 'express';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import jwt from 'jsonwebtoken';
 
 import { runRouterOnce } from './neuro_seller/router.js';
@@ -11,17 +11,47 @@ type ChatMessage = {
   content: string;
 };
 
+function requireEnvironmentVariable(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+  return value;
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
-  const JWT_SECRET = process.env.JWT_SECRET || 'iDG92r7B4quLPNV8qsDw';
+  const JWT_SECRET = requireEnvironmentVariable('JWT_SECRET');
+  const ADMIN_USERNAME = requireEnvironmentVariable('ADMIN_USERNAME');
+  const ADMIN_PASSWORD = requireEnvironmentVariable('ADMIN_PASSWORD');
 
+  if (JWT_SECRET.length < 32) {
+    throw new Error('JWT_SECRET must contain at least 32 characters');
+  }
+
+  app.disable('x-powered-by');
   app.use(express.json({ limit: '32kb' }));
 
   app.post('/api/login', (req, res) => {
-    const { username, password } = req.body;
-    if (username === 'admin' && (password === 'admin' || password === 'iDG92r7B4quLPNV8qsDw' || password === 'admin123')) {
-      const token = jwt.sign({ username, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+    const { username, password } = req.body as { username?: unknown; password?: unknown };
+    if (typeof username !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ success: false, message: 'Username and password are required' });
+    }
+
+    if (safeEqual(username, ADMIN_USERNAME) && safeEqual(password, ADMIN_PASSWORD)) {
+      const token = jwt.sign(
+        { username, role: 'admin' },
+        JWT_SECRET,
+        { algorithm: 'HS256', expiresIn: '24h', issuer: 'lambda19' },
+      );
       return res.json({ success: true, token });
     }
     return res.status(401).json({ success: false, message: 'Invalid username or password' });
@@ -34,7 +64,10 @@ async function startServer() {
     }
 
     try {
-      const decoded = jwt.verify(authHeader.slice(7), JWT_SECRET);
+      const decoded = jwt.verify(authHeader.slice(7), JWT_SECRET, {
+        algorithms: ['HS256'],
+        issuer: 'lambda19',
+      });
       return res.json({ success: true, decoded });
     } catch {
       return res.status(401).json({ success: false, message: 'Invalid or expired token' });
@@ -57,6 +90,10 @@ async function startServer() {
         return res.status(400).json({ success: false, message: 'Invalid or missing messages array' });
       }
 
+      if (sessionId !== undefined && (typeof sessionId !== 'string' || sessionId.trim().length > 128)) {
+        return res.status(400).json({ success: false, message: 'Invalid session ID' });
+      }
+
       const lastUserMessage = [...messages]
         .reverse()
         .find((message) => message.role === 'user' && typeof message.content === 'string')
@@ -73,13 +110,17 @@ async function startServer() {
       const result = await runRouterOnce(lastUserMessage, sessionId);
       return res.json({ success: true, text: result.response, sessionId: result.sessionId });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Internal Server Error';
       console.error('Error in /api/chat:', error);
-      return res.status(500).json({ success: false, message });
+      return res.status(500).json({ success: false, message: 'Unable to process the chat request' });
     }
   });
 
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok' });
+  });
+
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

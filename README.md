@@ -58,6 +58,24 @@ Contact requests are saved through `POST /api/leads`. Authenticated admin API en
 
 A user UUID is assigned only after the browser first sends a chat message or contact request. The server stores it in the `lambda19_user_id` cookie for one year with `HttpOnly` and `SameSite=Lax`. Chat sessions belong to that user, and new leads store both `user_id` and the owned `session_id` when a chat session already exists. The lead UUID is returned explicitly as `leadId` while the existing `lead.id` field remains available for compatibility.
 
+## Logging and retention
+
+The server uses Pino and `pino-http`. Production output is structured JSON written to stdout, so Docker or the hosting platform can collect it without storing files inside the application container. Authorization headers, cookies, passwords, tokens, API keys, and database URLs are redacted. Request bodies and AI conversation text are not written to logs.
+
+Logs that need retention and admin management are also stored in PostgreSQL with these categories:
+
+| Type | Content | Retention |
+| --- | --- | ---: |
+| `http_success` | Successful HTTP requests | 30 days |
+| `application_error` | Application and database errors | 90 days |
+| `ai_error` | AI consultant errors | 90 days |
+| `lead_audit` | Lead creation, updates, and deletion | 365 days |
+| `security_audit` | Authentication and administrator actions | 365 days |
+
+Expired rows are removed once at startup and then every 24 hours. The authenticated admin panel has a **Log Management** section for viewing counts, exporting up to 50,000 rows of one type as CSV, and deleting all rows of one type. Export and deletion require a reason and are themselves recorded in `security_audit`.
+
+Correlated records include `requestId`, `userId`, `sessionId`, and `leadId` when those identifiers are available.
+
 ## Production
 
 Set `NODE_ENV=production`, build the project, and start the bundled server:

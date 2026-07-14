@@ -15,7 +15,10 @@ import {
   ShieldCheck,
   UserCheck,
   MessageSquare,
-  LogOut
+  LogOut,
+  FileDown,
+  Database,
+  RefreshCw
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
@@ -46,6 +49,16 @@ interface ClientDialog {
   platform: 'Telegram' | 'Email' | 'Widget' | 'WhatsApp';
   status: 'ONLINE' | 'ACTIVE' | 'RESOLVED';
   messages: DialogMessage[];
+}
+
+type LogType = 'http_success' | 'application_error' | 'ai_error' | 'lead_audit' | 'security_audit';
+
+interface LogSummary {
+  type: LogType;
+  retentionDays: number;
+  count: number;
+  oldestAt: string | null;
+  newestAt: string | null;
 }
 
 export default function Admin() {
@@ -84,7 +97,7 @@ export default function Admin() {
 
     verifyToken();
   }, [navigate]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'leads' | 'agents' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'leads' | 'logs' | 'agents' | 'settings'>('overview');
   
   // Leads states
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -102,6 +115,12 @@ export default function Admin() {
   const [newLeadName, setNewLeadName] = useState('');
   const [newLeadContact, setNewLeadContact] = useState('');
   const [newLeadTask, setNewLeadTask] = useState('');
+
+  // Log retention and administration states
+  const [logSummary, setLogSummary] = useState<LogSummary[]>([]);
+  const [selectedLogType, setSelectedLogType] = useState<LogType>('http_success');
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsMessage, setLogsMessage] = useState('');
 
   // Client dialogs monitoring states
   const [selectedDialogId, setSelectedDialogId] = useState<string>('dialog_1');
@@ -271,6 +290,89 @@ export default function Admin() {
     };
     void loadLeads();
   }, [isAuthenticated, language]);
+
+  const loadLogSummary = async () => {
+    setLogsLoading(true);
+    setLogsMessage('');
+    try {
+      const token = localStorage.getItem('admin_token');
+      const response = await fetch('/api/logs/summary', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data.logs)) throw new Error('Unable to load logs');
+      setLogSummary(data.logs);
+    } catch {
+      setLogsMessage(language === 'ru' ? 'Не удалось загрузить информацию о логах.' : 'Unable to load log information.');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated && activeTab === 'logs') void loadLogSummary();
+  }, [activeTab, isAuthenticated]);
+
+  const handleExportLogs = async () => {
+    const reason = window.prompt(language === 'ru' ? 'Укажите причину выгрузки логов:' : 'Enter the reason for exporting logs:');
+    if (!reason?.trim()) return;
+    setLogsLoading(true);
+    setLogsMessage('');
+    try {
+      const token = localStorage.getItem('admin_token');
+      const query = new URLSearchParams({ type: selectedLogType, reason: reason.trim() });
+      const response = await fetch(`/api/logs/export?${query.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error('Unable to export logs');
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition');
+      const filename = disposition?.match(/filename="([^"]+)"/)?.[1] || `lambda19-${selectedLogType}.csv`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setLogsMessage(language === 'ru' ? 'Выгрузка подготовлена.' : 'Export prepared.');
+      await loadLogSummary();
+    } catch {
+      setLogsMessage(language === 'ru' ? 'Не удалось выгрузить логи.' : 'Unable to export logs.');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleDeleteLogs = async () => {
+    const confirmed = window.confirm(language === 'ru'
+      ? 'Удалить все логи выбранного типа? Это действие нельзя отменить.'
+      : 'Delete all logs of the selected type? This action cannot be undone.');
+    if (!confirmed) return;
+    const reason = window.prompt(language === 'ru' ? 'Укажите причину удаления логов:' : 'Enter the reason for deleting logs:');
+    if (!reason?.trim()) return;
+    setLogsLoading(true);
+    setLogsMessage('');
+    try {
+      const token = localStorage.getItem('admin_token');
+      const response = await fetch('/api/logs', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ type: selectedLogType, reason: reason.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error('Unable to delete logs');
+      setLogsMessage(language === 'ru'
+        ? `Удалено записей: ${data.deletedCount}`
+        : `Deleted entries: ${data.deletedCount}`);
+      await loadLogSummary();
+    } catch {
+      setLogsMessage(language === 'ru' ? 'Не удалось удалить логи.' : 'Unable to delete logs.');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
 
   const replaceLead = (updatedLead: Lead) => {
     setLeads((current) => current.map((lead) => lead.id === updatedLead.id ? updatedLead : lead));
@@ -477,6 +579,14 @@ export default function Admin() {
             <Bot size={18} />
             {language === 'ru' ? 'Мониторинг агента' : 'Agent Monitoring'}
           </button>
+
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'logs' ? 'bg-lambda-orange text-white orange-glow' : 'hover:bg-white/5 text-slate-400 hover:text-white'}`}
+          >
+            <Database size={18} />
+            {language === 'ru' ? 'Управление логами' : 'Log Management'}
+          </button>
           
           <button 
             onClick={() => setActiveTab('settings')}
@@ -488,6 +598,13 @@ export default function Admin() {
 
           <button 
             onClick={() => {
+              const token = localStorage.getItem('admin_token');
+              if (token) {
+                void fetch('/api/logout', {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+              }
               localStorage.removeItem('admin_token');
               navigate('/login');
             }}
@@ -1071,6 +1188,92 @@ export default function Admin() {
                 </div>
               </div>
             )}
+          {activeTab === 'logs' && (
+            <div className="space-y-6">
+              <div>
+                <h1 className="text-3xl font-bold text-white tracking-tight">
+                  {language === 'ru' ? 'Управление логами' : 'Log Management'}
+                </h1>
+                <p className="text-slate-400 mt-1">
+                  {language === 'ru'
+                    ? 'Сроки хранения применяются автоматически раз в сутки. Выгрузка и удаление фиксируются в журнале безопасности.'
+                    : 'Retention runs automatically every day. Exports and deletions are recorded in the security audit log.'}
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {logSummary.map((item) => (
+                  <button
+                    key={item.type}
+                    onClick={() => setSelectedLogType(item.type)}
+                    className={`glass-panel p-5 text-left transition-all border ${selectedLogType === item.type ? 'border-lambda-orange bg-lambda-orange/5' : 'border-white/5 hover:border-white/15'}`}
+                  >
+                    <div className="text-xs font-mono text-lambda-orange uppercase break-all">{item.type}</div>
+                    <div className="text-3xl font-bold text-white mt-2">{item.count}</div>
+                    <div className="text-xs text-slate-400 mt-2">
+                      {language === 'ru' ? 'Хранение' : 'Retention'}: {item.retentionDays} {language === 'ru' ? 'дней' : 'days'}
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-500 mt-2">
+                      {item.oldestAt ? new Date(item.oldestAt).toLocaleString() : (language === 'ru' ? 'Записей нет' : 'No entries')}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="glass-panel p-6 brushed-metal space-y-5">
+                <div className="flex flex-col md:flex-row md:items-end gap-4">
+                  <div className="flex-1 space-y-2">
+                    <label className="text-xs text-slate-400 block font-mono uppercase">
+                      {language === 'ru' ? 'Тип логов' : 'Log type'}
+                    </label>
+                    <select
+                      value={selectedLogType}
+                      onChange={(event) => setSelectedLogType(event.target.value as LogType)}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-sm text-white focus:outline-none focus:border-lambda-orange"
+                    >
+                      <option value="http_success">http_success — 30 days</option>
+                      <option value="application_error">application_error — 90 days</option>
+                      <option value="ai_error">ai_error — 90 days</option>
+                      <option value="lead_audit">lead_audit — 365 days</option>
+                      <option value="security_audit">security_audit — 365 days</option>
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={() => void loadLogSummary()}
+                    disabled={logsLoading}
+                    className="px-4 py-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <RefreshCw size={17} className={logsLoading ? 'animate-spin' : ''} />
+                    {language === 'ru' ? 'Обновить' : 'Refresh'}
+                  </button>
+                  <button
+                    onClick={() => void handleExportLogs()}
+                    disabled={logsLoading}
+                    className="px-4 py-3 rounded-xl bg-lambda-orange hover:brightness-110 text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <FileDown size={17} />
+                    {language === 'ru' ? 'Выгрузить CSV' : 'Export CSV'}
+                  </button>
+                  <button
+                    onClick={() => void handleDeleteLogs()}
+                    disabled={logsLoading}
+                    className="px-4 py-3 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <Trash2 size={17} />
+                    {language === 'ru' ? 'Удалить тип' : 'Delete type'}
+                  </button>
+                </div>
+
+                {logsMessage && (
+                  <div className="text-sm text-slate-300 bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                    {logsMessage}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'agents' && (
             <div className="space-y-6">
               <div>

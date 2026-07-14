@@ -7,12 +7,14 @@ import pinoHttp from 'pino-http';
 
 import {
   LEAD_STATUSES,
+  banUserForHours,
   checkDatabase,
   closeDatabase,
   createLead,
   deleteLead,
   ensureUser,
   findOwnedSessionId,
+  getActiveUserBan,
   listLeads,
   resolveChatSession,
   runMigrations,
@@ -47,6 +49,7 @@ type LogContext = {
   leadId?: string | null;
 };
 
+const GOODBYE_HARD_BAN_HOURS = 24;
 const USER_ID_COOKIE = 'lambda19_user_id';
 const USER_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -451,16 +454,52 @@ async function startServer() {
       }
 
       const userId = await getOrCreateUserId(req, res);
+      const activeBan = await getActiveUserBan(userId);
+      if (activeBan) {
+        const retryAfterSeconds = Math.max(1, Math.ceil((activeBan.getTime() - Date.now()) / 1000));
+        setLogContext(res, { userId });
+        res.setHeader('Retry-After', String(retryAfterSeconds));
+        await recordLog({
+          type: 'security_audit', level: 'warn', event: 'ai.user_ban_enforced',
+          message: 'Temporarily banned user attempted to access the AI consultant',
+          requestId: requestId(req), userId,
+          metadata: { bannedUntil: activeBan.toISOString(), retryAfterSeconds },
+        });
+        return res.status(429).json({
+          success: false,
+          code: 'USER_TEMPORARILY_BANNED',
+          message: 'Chat access is temporarily suspended',
+          bannedUntil: activeBan.toISOString(),
+        });
+      }
+
       const boundSessionId = await resolveChatSession(userId, sessionId);
       setLogContext(res, { userId, sessionId: boundSessionId });
       logger.info({ event: 'ai.request_started', requestId: requestId(req), userId, sessionId: boundSessionId }, 'AI consultant request started');
       const result = await runRouterOnce(lastUserMessage, boundSessionId);
+
+      let bannedUntil: Date | null = null;
+      if (result.goodbyeHardTriggered) {
+        bannedUntil = await banUserForHours(userId, GOODBYE_HARD_BAN_HOURS);
+        await recordLog({
+          type: 'security_audit', level: 'warn', event: 'ai.user_temporarily_banned',
+          message: 'User temporarily banned after goodbye_hard response',
+          requestId: requestId(req), userId, sessionId: result.sessionId,
+          metadata: {
+            durationHours: GOODBYE_HARD_BAN_HOURS,
+            bannedUntil: bannedUntil.toISOString(),
+          },
+        });
+      }
+
       logger.info({ event: 'ai.request_completed', requestId: requestId(req), userId, sessionId: result.sessionId }, 'AI consultant request completed');
       return res.json({
         success: true,
         text: result.response,
         userId,
         sessionId: result.sessionId,
+        temporarilyBanned: Boolean(bannedUntil),
+        bannedUntil: bannedUntil?.toISOString() ?? null,
       });
     } catch (error: unknown) {
       const context = (res.locals.logContext || {}) as LogContext;

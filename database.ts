@@ -8,6 +8,9 @@ export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
 export type Lead = {
   id: string;
+  leadId: string;
+  userId: string | null;
+  sessionId: string | null;
   name: string;
   contact: string;
   task: string;
@@ -19,6 +22,8 @@ export type Lead = {
 
 type LeadRow = {
   id: string;
+  user_id: string | null;
+  session_id: string | null;
   name: string;
   contact: string;
   task: string;
@@ -43,6 +48,9 @@ export const pool = new Pool({
 function mapLead(row: LeadRow): Lead {
   return {
     id: row.id,
+    leadId: row.id,
+    userId: row.user_id,
+    sessionId: row.session_id,
     name: row.name,
     contact: row.contact,
     task: row.task,
@@ -96,12 +104,70 @@ export async function runMigrations(): Promise<void> {
   }
 }
 
-export async function createLead(input: { name: string; contact: string; task: string }): Promise<Lead> {
+export async function ensureUser(userId: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO users (id)
+     VALUES ($1)
+     ON CONFLICT (id) DO UPDATE SET last_seen_at = NOW()`,
+    [userId],
+  );
+}
+
+export async function resolveChatSession(
+  userId: string,
+  requestedSessionId?: string,
+): Promise<string> {
+  if (requestedSessionId) {
+    const claimed = await pool.query<{ id: string }>(
+      `INSERT INTO chat_sessions (id, user_id)
+       VALUES ($1, $2)
+       ON CONFLICT (id) DO UPDATE
+       SET last_seen_at = NOW()
+       WHERE chat_sessions.user_id = EXCLUDED.user_id
+       RETURNING id`,
+      [requestedSessionId, userId],
+    );
+
+    if (claimed.rows[0]) {
+      return claimed.rows[0].id;
+    }
+  }
+
+  const sessionId = randomUUID();
+  await pool.query(
+    'INSERT INTO chat_sessions (id, user_id) VALUES ($1, $2)',
+    [sessionId, userId],
+  );
+  return sessionId;
+}
+
+export async function findOwnedSessionId(
+  userId: string,
+  sessionId?: string,
+): Promise<string | null> {
+  if (!sessionId) return null;
+
+  const result = await pool.query<{ id: string }>(
+    `SELECT id
+     FROM chat_sessions
+     WHERE id = $1 AND user_id = $2`,
+    [sessionId, userId],
+  );
+  return result.rows[0]?.id ?? null;
+}
+
+export async function createLead(input: {
+  userId: string;
+  sessionId: string | null;
+  name: string;
+  contact: string;
+  task: string;
+}): Promise<Lead> {
   const result = await pool.query<LeadRow>(
-    `INSERT INTO leads (id, name, contact, task)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO leads (id, user_id, session_id, name, contact, task)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [randomUUID(), input.name, input.contact, input.task],
+    [randomUUID(), input.userId, input.sessionId, input.name, input.contact, input.task],
   );
   return mapLead(result.rows[0]);
 }

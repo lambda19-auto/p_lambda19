@@ -52,9 +52,9 @@ npm run lint
 npm run build
 ```
 
-The browser sends chat messages to `POST /api/chat`. Agent instructions and the OpenAI API key remain on the server.
+The browser sends chat messages to `POST /api/chat`. Agent instructions and the OpenAI API key remain on the server. On the first user message, the server creates a `user_id`, stores it in the HttpOnly `lambda19_user_id` cookie, and links it to the chat `session_id` in PostgreSQL.
 
-Contact requests are saved through `POST /api/leads`. Authenticated admin API endpoints provide lead listing, status and notes updates, and deletion. Leads are stored in PostgreSQL rather than browser storage.
+Contact requests are saved through `POST /api/leads`. Every request receives its own `lead_id`. When the visitor previously used the consultant, the lead is also linked to the verified `user_id` and `session_id`; direct requests without a chat remain supported. Authenticated admin API endpoints provide lead listing, status and notes updates, and deletion. Leads are stored in PostgreSQL rather than browser storage.
 
 ## Production
 

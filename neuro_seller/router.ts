@@ -142,6 +142,15 @@ function getSession(sessionId: string) {
   return session;
 }
 
+function wasToolCalled(items: readonly unknown[], toolName: string): boolean {
+  return items.some((item) => (
+    typeof item === 'object'
+    && item !== null
+    && 'toolName' in item
+    && (item as { toolName?: unknown }).toolName === toolName
+  ));
+}
+
 export async function runRouterOnce(input: string, requestedSessionId?: string) {
   const sessionId = requestedSessionId?.trim() || uuidv7();
   const result = await run(routerAgent, input, { session: getSession(sessionId) });
@@ -149,5 +158,6 @@ export async function runRouterOnce(input: string, requestedSessionId?: string) 
   return {
     response: String(result.finalOutput ?? ''),
     sessionId,
+    goodbyeHardTriggered: wasToolCalled(result.newItems, 'goodbye_hard'),
   };
 }

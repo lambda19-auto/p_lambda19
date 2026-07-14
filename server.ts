@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { timingSafeEqual } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import path from 'path';
 import jwt from 'jsonwebtoken';
@@ -10,7 +10,10 @@ import {
   closeDatabase,
   createLead,
   deleteLead,
+  ensureUser,
+  findOwnedSessionId,
   listLeads,
+  resolveChatSession,
   runMigrations,
   updateLead,
   type LeadStatus,
@@ -21,6 +24,35 @@ type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
 };
+
+const USER_ID_COOKIE = 'lambda19_user_id';
+const USER_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function getCookie(req: Request, name: string): string | undefined {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return undefined;
+
+  for (const part of cookieHeader.split(';')) {
+    const separatorIndex = part.indexOf('=');
+    if (separatorIndex === -1) continue;
+
+    const key = part.slice(0, separatorIndex).trim();
+    if (key !== name) continue;
+
+    try {
+      return decodeURIComponent(part.slice(separatorIndex + 1).trim());
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
 
 function requireEnvironmentVariable(name: string): string {
   const value = process.env[name]?.trim();
@@ -59,6 +91,25 @@ async function startServer() {
   }
 
   await runMigrations();
+
+  const getOrCreateUserId = async (req: Request, res: Response): Promise<string> => {
+    const cookieUserId = getCookie(req, USER_ID_COOKIE);
+    const userId = isUuid(cookieUserId) ? cookieUserId : randomUUID();
+
+    await ensureUser(userId);
+
+    if (cookieUserId !== userId) {
+      res.cookie(USER_ID_COOKIE, userId, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: USER_COOKIE_MAX_AGE_MS,
+        path: '/',
+      });
+    }
+
+    return userId;
+  };
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '32kb' }));
@@ -116,10 +167,11 @@ async function startServer() {
 
   app.post('/api/leads', async (req, res) => {
     try {
-      const { name, contact, task } = req.body as {
+      const { name, contact, task, sessionId } = req.body as {
         name?: unknown;
         contact?: unknown;
         task?: unknown;
+        sessionId?: unknown;
       };
       const validName = parseRequiredText(name, 200);
       const validContact = parseRequiredText(contact, 500);
@@ -128,9 +180,26 @@ async function startServer() {
       if (!validName || !validContact || validTask === null) {
         return res.status(400).json({ success: false, message: 'Invalid lead data' });
       }
+      if (sessionId !== undefined && !isUuid(sessionId)) {
+        return res.status(400).json({ success: false, message: 'Invalid session ID' });
+      }
 
-      const lead = await createLead({ name: validName, contact: validContact, task: validTask });
-      return res.status(201).json({ success: true, lead });
+      const userId = await getOrCreateUserId(req, res);
+      const ownedSessionId = await findOwnedSessionId(userId, sessionId);
+      const lead = await createLead({
+        userId,
+        sessionId: ownedSessionId,
+        name: validName,
+        contact: validContact,
+        task: validTask,
+      });
+      return res.status(201).json({
+        success: true,
+        userId,
+        sessionId: ownedSessionId,
+        leadId: lead.leadId,
+        lead,
+      });
     } catch (error: unknown) {
       console.error('Error creating lead:', error);
       return res.status(500).json({ success: false, message: 'Unable to save the lead' });
@@ -199,7 +268,7 @@ async function startServer() {
         return res.status(400).json({ success: false, message: 'Invalid or missing messages array' });
       }
 
-      if (sessionId !== undefined && (typeof sessionId !== 'string' || sessionId.trim().length > 128)) {
+      if (sessionId !== undefined && !isUuid(sessionId)) {
         return res.status(400).json({ success: false, message: 'Invalid session ID' });
       }
 
@@ -216,8 +285,15 @@ async function startServer() {
         return res.status(413).json({ success: false, message: 'Message is too long' });
       }
 
-      const result = await runRouterOnce(lastUserMessage, sessionId);
-      return res.json({ success: true, text: result.response, sessionId: result.sessionId });
+      const userId = await getOrCreateUserId(req, res);
+      const boundSessionId = await resolveChatSession(userId, sessionId);
+      const result = await runRouterOnce(lastUserMessage, boundSessionId);
+      return res.json({
+        success: true,
+        text: result.response,
+        userId,
+        sessionId: result.sessionId,
+      });
     } catch (error: unknown) {
       console.error('Error in /api/chat:', error);
       return res.status(500).json({ success: false, message: 'Unable to process the chat request' });

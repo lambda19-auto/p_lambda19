@@ -56,6 +56,8 @@ The browser sends chat messages to `POST /api/chat`. Agent instructions and the 
 
 Contact requests are saved through `POST /api/leads`. Authenticated admin API endpoints provide lead listing, status and notes updates, and deletion. Leads are stored in PostgreSQL rather than browser storage.
 
+A user UUID is assigned only after the browser first sends a chat message or contact request. The server stores it in the `lambda19_user_id` cookie for one year with `HttpOnly` and `SameSite=Lax`. Chat sessions belong to that user, and new leads store both `user_id` and the owned `session_id` when a chat session already exists. The lead UUID is returned explicitly as `leadId` while the existing `lead.id` field remains available for compatibility.
+
 ## Production
 
 Set `NODE_ENV=production`, build the project, and start the bundled server:

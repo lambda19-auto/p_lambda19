@@ -18,8 +18,8 @@ export default function ChatWidget() {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [sessionId, setSessionId] = useState(() =>
-    localStorage.getItem('lambda19_widget_session') || crypto.randomUUID()
+  const [sessionId, setSessionId] = useState(
+    () => localStorage.getItem('lambda19_widget_session') || '',
   );
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -66,9 +66,10 @@ export default function ChatWidget() {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'same-origin',
         body: JSON.stringify({
           messages: updatedMessages,
-          sessionId,
+          sessionId: sessionId || undefined,
         }),
       });
 

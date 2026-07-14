@@ -28,6 +28,8 @@ interface Lead {
   status: 'New' | 'In Progress' | 'Completed' | 'Rejected';
   createdAt: string;
   notes?: string;
+  userId: string | null;
+  sessionId: string | null;
 }
 
 interface DialogMessage {
@@ -995,6 +997,17 @@ export default function Admin() {
                             <span className="text-sm font-mono text-white block select-all bg-white/5 p-2 rounded mt-1 border border-white/5">
                               {selectedLead.contact}
                             </span>
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] font-mono text-slate-500 uppercase block">
+                              {language === 'ru' ? 'ИДЕНТИФИКАТОРЫ' : 'IDENTIFIERS'}
+                            </span>
+                            <div className="text-[11px] font-mono text-slate-300 bg-white/5 p-3 rounded mt-1 border border-white/5 space-y-1 select-all">
+                              <div>lead_id: {selectedLead.id}</div>
+                              <div>user_id: {selectedLead.userId || '—'}</div>
+                              <div>session_id: {selectedLead.sessionId || '—'}</div>
+                            </div>
                           </div>
 
                           <div>

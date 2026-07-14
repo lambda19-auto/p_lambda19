@@ -3,6 +3,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { Pool, type PoolClient } from 'pg';
 
+import { logger } from './logger.js';
+
 export const LEAD_STATUSES = ['New', 'In Progress', 'Completed', 'Rejected'] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -64,7 +66,7 @@ function mapLead(row: LeadRow): Lead {
 async function applyMigration(client: PoolClient, name: string, sql: string): Promise<void> {
   await client.query(sql);
   await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [name]);
-  console.log(`Applied database migration: ${name}`);
+  logger.info({ event: 'database.migration_applied', migration: name }, 'Applied database migration');
 }
 
 export async function runMigrations(): Promise<void> {

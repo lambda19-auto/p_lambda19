@@ -54,6 +54,16 @@ npm run build
 
 The browser sends chat messages to `POST /api/chat`. Agent instructions and the OpenAI API key remain on the server.
 
+### Consultant site search
+
+Set `CONSULT_SEARCH_DOMAIN` to give the `consult` agent a hosted web-search tool restricted to that domain:
+
+```env
+CONSULT_SEARCH_DOMAIN=lambda19.org
+```
+
+Use a hostname without a path, query, port, or credentials. Values with `http://` or `https://` are normalized to the hostname. The allowed domain also includes its subdomains. If the variable is empty or absent, the search tool is not attached, which prevents accidental unrestricted web searches.
+
 Contact requests are saved through `POST /api/leads`. Authenticated admin API endpoints provide lead listing, status and notes updates, and deletion. Leads are stored in PostgreSQL rather than browser storage.
 
 A user UUID is assigned only after the browser first sends a chat message or contact request. The server stores it in the `lambda19_user_id` cookie for one year with `HttpOnly` and `SameSite=Lax`. Chat sessions belong to that user, and new leads store both `user_id` and the owned `session_id` when a chat session already exists. The lead UUID is returned explicitly as `leadId` while the existing `lead.id` field remains available for compatibility.

@@ -115,6 +115,36 @@ export async function ensureUser(userId: string): Promise<void> {
   );
 }
 
+export async function getActiveUserBan(userId: string): Promise<Date | null> {
+  const result = await pool.query<{ banned_until: Date }>(
+    `SELECT banned_until
+     FROM users
+     WHERE id = $1 AND banned_until > NOW()`,
+    [userId],
+  );
+  return result.rows[0]?.banned_until ?? null;
+}
+
+export async function banUserForHours(userId: string, hours: number): Promise<Date> {
+  if (!Number.isInteger(hours) || hours <= 0) {
+    throw new Error('Ban duration must be a positive whole number of hours');
+  }
+
+  const result = await pool.query<{ banned_until: Date }>(
+    `UPDATE users
+     SET banned_until = NOW() + make_interval(hours => $2),
+         last_seen_at = NOW()
+     WHERE id = $1
+     RETURNING banned_until`,
+    [userId, hours],
+  );
+  const bannedUntil = result.rows[0]?.banned_until;
+  if (!bannedUntil) {
+    throw new Error('Cannot ban a user that does not exist');
+  }
+  return bannedUntil;
+}
+
 export async function resolveChatSession(
   userId: string,
   requestedSessionId?: string,

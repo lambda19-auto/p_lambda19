@@ -19,7 +19,7 @@ export default function ChatWidget() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState(() =>
-    localStorage.getItem('lambda19_widget_session') || crypto.randomUUID()
+    localStorage.getItem('lambda19_widget_session') || ''
   );
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -68,7 +68,7 @@ export default function ChatWidget() {
         },
         body: JSON.stringify({
           messages: updatedMessages,
-          sessionId,
+          sessionId: sessionId || undefined,
         }),
       });
 

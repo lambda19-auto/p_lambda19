@@ -21,7 +21,13 @@ const ContactForm = () => {
       const response = await fetch('/api/leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, contact, task }),
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          name,
+          contact,
+          task,
+          sessionId: localStorage.getItem('lambda19_widget_session') || undefined,
+        }),
       });
       if (!response.ok) throw new Error('Unable to save lead');
 

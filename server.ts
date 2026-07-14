@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { timingSafeEqual } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import path from 'path';
 import jwt from 'jsonwebtoken';
@@ -7,9 +7,11 @@ import jwt from 'jsonwebtoken';
 import {
   LEAD_STATUSES,
   checkDatabase,
+  claimChatSession,
   closeDatabase,
   createLead,
   deleteLead,
+  getLeadIdentity,
   listLeads,
   runMigrations,
   updateLead,
@@ -21,6 +23,29 @@ type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
 };
+
+const USER_ID_COOKIE = 'lambda19_user_id';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function readUserIdCookie(req: Request): string | null {
+  const cookie = req.headers.cookie
+    ?.split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${USER_ID_COOKIE}=`))
+    ?.slice(USER_ID_COOKIE.length + 1);
+
+  return cookie && UUID_PATTERN.test(cookie) ? cookie : null;
+}
+
+function setUserIdCookie(res: Response, userId: string): void {
+  res.cookie(USER_ID_COOKIE, userId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 365 * 24 * 60 * 60 * 1000,
+    path: '/',
+  });
+}
 
 function requireEnvironmentVariable(name: string): string {
   const value = process.env[name]?.trim();
@@ -116,20 +141,31 @@ async function startServer() {
 
   app.post('/api/leads', async (req, res) => {
     try {
-      const { name, contact, task } = req.body as {
+      const { name, contact, task, sessionId } = req.body as {
         name?: unknown;
         contact?: unknown;
         task?: unknown;
+        sessionId?: unknown;
       };
       const validName = parseRequiredText(name, 200);
       const validContact = parseRequiredText(contact, 500);
       const validTask = task === undefined || task === '' ? '' : parseRequiredText(task, 10_000);
+      const validSessionId = sessionId === undefined || sessionId === ''
+        ? null
+        : parseRequiredText(sessionId, 128);
 
-      if (!validName || !validContact || validTask === null) {
+      if (!validName || !validContact || validTask === null || (sessionId !== undefined && sessionId !== '' && !validSessionId)) {
         return res.status(400).json({ success: false, message: 'Invalid lead data' });
       }
 
-      const lead = await createLead({ name: validName, contact: validContact, task: validTask });
+      const identity = await getLeadIdentity(readUserIdCookie(req), validSessionId);
+      const lead = await createLead({
+        name: validName,
+        contact: validContact,
+        task: validTask,
+        userId: identity.userId,
+        sessionId: identity.sessionId,
+      });
       return res.status(201).json({ success: true, lead });
     } catch (error: unknown) {
       console.error('Error creating lead:', error);
@@ -216,8 +252,18 @@ async function startServer() {
         return res.status(413).json({ success: false, message: 'Message is too long' });
       }
 
-      const result = await runRouterOnce(lastUserMessage, sessionId);
-      return res.json({ success: true, text: result.response, sessionId: result.sessionId });
+      const cookieUserId = readUserIdCookie(req);
+      const userId = cookieUserId || randomUUID();
+      const claimedSessionId = await claimChatSession(userId, sessionId?.trim() || undefined);
+      if (!cookieUserId) setUserIdCookie(res, userId);
+
+      const result = await runRouterOnce(lastUserMessage, claimedSessionId);
+      return res.json({
+        success: true,
+        text: result.response,
+        sessionId: result.sessionId,
+        userId,
+      });
     } catch (error: unknown) {
       console.error('Error in /api/chat:', error);
       return res.status(500).json({ success: false, message: 'Unable to process the chat request' });

@@ -1,4 +1,38 @@
-import { Agent } from '@openai/agents';
+import { Agent, webSearchTool } from '@openai/agents';
+
+export function normalizeConsultSearchDomain(value: string | undefined): string | undefined {
+  const configuredValue = value?.trim();
+  if (!configuredValue) return undefined;
+
+  let url: URL;
+  try {
+    url = new URL(configuredValue.includes('://') ? configuredValue : `https://${configuredValue}`);
+  } catch {
+    throw new Error('CONSULT_SEARCH_DOMAIN must be a valid domain, for example lambda19.org');
+  }
+
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:')
+    || url.username
+    || url.password
+    || url.port
+    || url.pathname !== '/'
+    || url.search
+    || url.hash
+  ) {
+    throw new Error('CONSULT_SEARCH_DOMAIN must contain only a domain without a path, port, query, or credentials');
+  }
+
+  return url.hostname.toLowerCase().replace(/\.$/, '');
+}
+
+const consultSearchDomain = normalizeConsultSearchDomain(process.env.CONSULT_SEARCH_DOMAIN);
+const consultTools = consultSearchDomain
+  ? [webSearchTool({
+      filters: { allowedDomains: [consultSearchDomain] },
+      searchContextSize: 'low',
+    })]
+  : [];
 
 export const INSTRUCTION = `
 1. Роль и Контекст
@@ -105,12 +139,21 @@ Telegram: @lambda19_main
 Главная цель:
 
 Вести диалог как управленческий консультант.
+
+---
+
+7. Поиск по сайту
+
+Если вопрос клиента требует актуальной или более подробной информации о компании, услугах или материалах сайта, используй инструмент веб-поиска.
+Ищи и используй информацию только из разрешённого домена.
+Если в разрешённом домене нет достаточной информации, честно сообщи об этом и не дополняй ответ сведениями из других сайтов.
 `.trim();
 
 export const consultAgent = new Agent({
   name: 'consult',
   instructions: INSTRUCTION,
   model: 'gpt-5.4-nano-2026-03-17',
+  tools: consultTools,
   modelSettings: {
     reasoning: { effort: 'medium' },
     text: { verbosity: 'low' },

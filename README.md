@@ -54,6 +54,8 @@ npm run build
 
 The browser sends chat messages to `POST /api/chat`. Agent instructions and the OpenAI API key remain on the server.
 
+When the router invokes `goodbye_hard`, the server returns that agent's final response and then blocks the associated user from further chat requests for 24 hours. The expiry is stored in PostgreSQL, so the restriction survives restarts. Blocked requests receive HTTP `429`, a `Retry-After` header, and the `USER_TEMPORARILY_BANNED` error code. The public website and lead form remain available.
+
 ### Consultant site search
 
 Set `CONSULT_SEARCH_DOMAIN` to give the `consult` agent a hosted web-search tool restricted to that domain:
